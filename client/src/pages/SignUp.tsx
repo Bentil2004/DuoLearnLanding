@@ -1,7 +1,5 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -13,17 +11,22 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { motion } from "framer-motion";
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../firebase"; // Make sure you've created this config file
 
 const SignUp = () => {
   const { toast } = useToast();
   const [_, navigate] = useLocation();
   const [showPassword, setShowPassword] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
   
   const form = useForm<InsertUser & { agreeTerms: boolean }>({
     resolver: zodResolver(
       insertUserSchema.extend({
-        agreeTerms: z => z === true ? true : "You must agree to the terms"
+        agreeTerms: z.literal(true, {
+          errorMap: () => ({ message: "You must agree to the terms" })
+        })
       })
     ),
     defaultValues: {
@@ -49,37 +52,63 @@ const SignUp = () => {
   const strengthInfo = getPasswordStrengthText(passwordStrength);
   const strengthColor = getPasswordStrengthColor(passwordStrength);
   
-  const mutation = useMutation({
-    mutationFn: async (data: InsertUser) => {
-      const { agreeTerms, ...userData } = data as any;
-      // Generate a username from the email if not provided
-      if (!userData.username) {
-        userData.username = userData.email.split('@')[0];
-      }
+  const handleFirebaseSignUp = async (data: InsertUser & { agreeTerms: boolean }) => {
+    if (!data.agreeTerms) {
+      toast({
+        title: "Error",
+        description: "You must agree to the terms",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    
+    try {
+      const { email, password } = data;
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
       
-      const response = await apiRequest("POST", "/api/auth/register", userData);
-      return response.json();
-    },
-    onSuccess: () => {
+      // Here you can optionally save additional user data to your database
+      // await apiRequest("POST", "/api/users", {
+      //   uid: user.uid,
+      //   name: data.name,
+      //   email: data.email,
+      //   username: data.username || data.email.split('@')[0]
+      // });
+
       toast({
         title: "Success!",
         description: "Your account has been created",
         variant: "default",
       });
+      
       // Redirect to sign in after successful registration
       setTimeout(() => navigate("/signin"), 1500);
-    },
-    onError: (error) => {
+    } catch (error: any) {
+      let errorMessage = "Please check your information and try again";
+      
+      // Handle specific Firebase errors
+      if (error.code === "auth/email-already-in-use") {
+        errorMessage = "This email is already in use";
+      } else if (error.code === "auth/weak-password") {
+        errorMessage = "Password should be at least 6 characters";
+      } else if (error.code === "auth/invalid-email") {
+        errorMessage = "Please enter a valid email address";
+      }
+      
       toast({
         title: "Error creating account",
-        description: error.message || "Please check your information and try again",
+        description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
-  });
+  };
   
   const onSubmit = (data: InsertUser & { agreeTerms: boolean }) => {
-    mutation.mutate(data);
+    handleFirebaseSignUp(data);
   };
   
   return (
@@ -207,9 +236,9 @@ const SignUp = () => {
             <Button 
               type="submit" 
               className="w-full py-6 bg-duoGreen text-white font-bold rounded-2xl hover:bg-duoGreenHover transition focus:outline-none"
-              disabled={mutation.isPending}
+              disabled={isLoading}
             >
-              {mutation.isPending ? (
+              {isLoading ? (
                 <span className="flex items-center justify-center">
                   <i className="fas fa-circle-notch fa-spin mr-2"></i>
                   Creating your account...
@@ -262,7 +291,7 @@ const SignUp = () => {
         <i className="fas fa-arrow-left mr-2"></i> Back to Home
       </Button>
     </div>
-  );
+  );   // ... rest of your JSX remains exactly the same    // Just update the Button's disabled prop to use isLoading instead of mutation.isPending    
 };
 
 export default SignUp;

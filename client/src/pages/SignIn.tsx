@@ -1,7 +1,5 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,11 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { motion } from "framer-motion";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../firebase";
 
 const SignIn = () => {
   const { toast } = useToast();
   const [_, navigate] = useLocation();
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
   const form = useForm<LoginUser>({
     resolver: zodResolver(loginUserSchema),
@@ -23,32 +24,67 @@ const SignIn = () => {
       password: ""
     }
   });
-  
-  const mutation = useMutation({
-    mutationFn: async (data: LoginUser) => {
-      const response = await apiRequest("POST", "/api/auth/login", data);
-      return response.json();
-    },
-    onSuccess: () => {
+
+  const handleFirebaseLogin = async (data: LoginUser) => {
+    setIsLoading(true);
+    
+    try {
+      const { email, password } = data;
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Optional: Verify email if you require email verification
+      // if (!user.emailVerified) {
+      //   toast({
+      //     title: "Email not verified",
+      //     description: "Please verify your email address",
+      //     variant: "destructive",
+      //   });
+      //   return;
+      // }
+
       toast({
         title: "Success!",
         description: "You've successfully signed in",
         variant: "default",
       });
+
       // Navigate to the dashboard or home page after successful login
       setTimeout(() => navigate("/"), 1500);
-    },
-    onError: (error) => {
+    } catch (error: any) {
+      let errorMessage = "Please check your credentials and try again";
+      
+      // Handle specific Firebase errors
+      switch (error.code) {
+        case "auth/invalid-email":
+          errorMessage = "Please enter a valid email address";
+          break;
+        case "auth/user-disabled":
+          errorMessage = "This account has been disabled";
+          break;
+        case "auth/user-not-found":
+          errorMessage = "No account found with this email";
+          break;
+        case "auth/wrong-password":
+          errorMessage = "Incorrect password";
+          break;
+        case "auth/too-many-requests":
+          errorMessage = "Too many attempts. Try again later";
+          break;
+      }
+      
       toast({
         title: "Error signing in",
-        description: error.message || "Please check your credentials and try again",
+        description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
-  });
+  };
   
   const onSubmit = (data: LoginUser) => {
-    mutation.mutate(data);
+    handleFirebaseLogin(data);
   };
   
   return (
@@ -118,9 +154,9 @@ const SignIn = () => {
             <Button 
               type="submit" 
               className="w-full py-6 bg-duoGreen text-white font-bold rounded-2xl hover:bg-duoGreenHover transition focus:outline-none"
-              disabled={mutation.isPending}
+              disabled={isLoading}
             >
-              {mutation.isPending ? (
+              {isLoading ? (
                 <span className="flex items-center">
                   <i className="fas fa-circle-notch fa-spin mr-2"></i>
                   Signing in...
